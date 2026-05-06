@@ -432,7 +432,7 @@ with st.sidebar.expander("상세 라벨 설정", expanded=False):
 
     small_area = st.slider(
         "작은 국가 기준",
-        min_value=1.0,
+        min_value=0.0,
         max_value=30.0,
         value=1.0,
         step=0.5
