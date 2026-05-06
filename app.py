@@ -8,6 +8,8 @@ import math
 import folium
 from streamlit_folium import st_folium
 
+A4_LANDSCAPE_RATIO = 297 / 210
+
 st.set_page_config(page_title="교육용 지도 생성기", layout="wide")
 st.title("교육용 지도 생성기")
 
@@ -609,13 +611,20 @@ if view_mode == "탐색 모드":
         [y_max, x_max]
     ])
 
+A4_MAP_WIDTH = 1200
+A4_MAP_HEIGHT = int(A4_MAP_WIDTH / A4_LANDSCAPE_RATIO)
+
+map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
+
+with map_col:
     map_data = st_folium(
         m,
-        height=700,
-        use_container_width=True,
+        width=A4_MAP_WIDTH,
+        height=A4_MAP_HEIGHT,
         returned_objects=["bounds"],
         key="explore_map"
     )
+
 
     if map_data and map_data.get("bounds"):
         bounds = map_data["bounds"]
