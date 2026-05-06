@@ -510,8 +510,12 @@ if view_mode == "탐색 모드":
     m = folium.Map(
         location=center,
         zoom_start=2,
-        tiles="cartodbpositron"
-    )
+        tiles="cartodbpositron",
+        zoom_control=True,
+        zoom_snap=0.25,
+        zoom_delta=0.25,
+        wheel_px_per_zoom_level=180,
+)
 
     folium.GeoJson(
         world[["ADMIN", "KO", "geometry"]].to_json(),
