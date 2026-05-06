@@ -8,7 +8,7 @@ import math
 import folium
 from streamlit_folium import st_folium
 
-A4_LANDSCAPE_RATIO = 297 / 210
+
 
 st.set_page_config(page_title="교육용 지도 생성기", layout="wide")
 st.title("교육용 지도 생성기")
@@ -581,7 +581,7 @@ if view_mode == "탐색 모드":
         zoom_snap=0.25,
         zoom_delta=0.25,
         wheel_px_per_zoom_level=180,
-    )
+)
 
     folium.GeoJson(
         world[["ADMIN", "KO", "geometry"]].to_json(),
@@ -611,19 +611,13 @@ if view_mode == "탐색 모드":
         [y_max, x_max]
     ])
 
-    A4_MAP_WIDTH = 1200
-    A4_MAP_HEIGHT = int(A4_MAP_WIDTH / A4_LANDSCAPE_RATIO)
-
-    map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
-
-    with map_col:
-        map_data = st_folium(
-            m,
-            width=A4_MAP_WIDTH,
-            height=A4_MAP_HEIGHT,
-            returned_objects=["bounds"],
-            key="explore_map"
-        )
+    map_data = st_folium(
+        m,
+        height=700,
+        use_container_width=True,
+        returned_objects=["bounds"],
+        key="explore_map"
+    )
 
     if map_data and map_data.get("bounds"):
         bounds = map_data["bounds"]
@@ -643,7 +637,6 @@ if view_mode == "탐색 모드":
         st.session_state.explore_view = fit_view_to_ratio(*view_bounds)
 
     st.stop()
-
 
 # -----------------------------
 # 지도 그리기
@@ -853,7 +846,23 @@ ax.axis("off")
 
 fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-st.pyplot(fig, use_container_width=False)
+preview_buf = io.BytesIO()
+fig.savefig(
+    preview_buf,
+    format="png",
+    dpi=150,
+    facecolor=fig.get_facecolor()
+)
+preview_buf.seek(0)
+
+preview_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
+
+with preview_col:
+    st.image(
+        preview_buf,
+        width=1200
+    )
+
 
 # -----------------------------
 # 다운로드
