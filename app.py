@@ -53,7 +53,7 @@ world = load_data()
 # 프리셋
 # -----------------------------
 presets = {
-    "세계지도": (-180.0, 180.0, -60.0, 85.0),
+    "세계지도": (-180.0, 180.0, -90.0, 90.0),
     "유럽": (-10.0, 70.0, 25.0, 70.0),
     "아시아": (25.0, 150.0, -10.0, 60.0),
     "아프리카": (-20.0, 55.0, -40.0, 40.0),
@@ -103,26 +103,48 @@ def fit_view_to_ratio(x_min, x_max, y_min, y_max, target_ratio=A4_LANDSCAPE_RATI
     if width <= 0 or height <= 0:
         return x_min, x_max, y_min, y_max
 
+    center_x = (x_min + x_max) / 2
+    center_y = (y_min + y_max) / 2
+
     current_ratio = width / height
 
     if current_ratio > target_ratio:
-        new_height = width / target_ratio
-        center_y = (y_min + y_max) / 2
-        y_min = center_y - new_height / 2
-        y_max = center_y + new_height / 2
+        height = width / target_ratio
+    else:
+        width = height * target_ratio
 
-    elif current_ratio < target_ratio:
-        new_width = height * target_ratio
-        center_x = (x_min + x_max) / 2
-        x_min = center_x - new_width / 2
-        x_max = center_x + new_width / 2
+    max_width = 360.0
+    max_height = 180.0
 
-    y_min = max(-90.0, y_min)
-    y_max = min(90.0, y_max)
-    x_min = max(-180.0, x_min)
-    x_max = min(180.0, x_max)
+    if height > max_height:
+        height = max_height
+        width = height * target_ratio
+
+    if width > max_width:
+        width = max_width
+        height = width / target_ratio
+
+    x_min = center_x - width / 2
+    x_max = center_x + width / 2
+    y_min = center_y - height / 2
+    y_max = center_y + height / 2
+
+    if x_min < -180:
+        x_max += -180 - x_min
+        x_min = -180
+    if x_max > 180:
+        x_min -= x_max - 180
+        x_max = 180
+
+    if y_min < -90:
+        y_max += -90 - y_min
+        y_min = -90
+    if y_max > 90:
+        y_min -= y_max - 90
+        y_max = 90
 
     return x_min, x_max, y_min, y_max
+
 
 
 def apply_view(x_min, x_max, y_min, y_max):
@@ -822,7 +844,7 @@ ax.axis("off")
 
 fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-st.pyplot(fig)
+st.pyplot(fig, use_container_width=False)
 
 # -----------------------------
 # 다운로드
@@ -869,8 +891,7 @@ pdf_buf = io.BytesIO()
 fig.savefig(
     pdf_buf,
     format="pdf",
-    facecolor=fig.get_facecolor(),
-    bbox_inches=None
+    facecolor=fig.get_facecolor()
 )
 pdf_buf.seek(0)
 
