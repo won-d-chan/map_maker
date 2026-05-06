@@ -93,6 +93,37 @@ if "saved_view" not in st.session_state:
 if "explore_view" not in st.session_state:
     st.session_state.explore_view = None
 
+A4_LANDSCAPE_RATIO = 297 / 210
+
+
+def fit_view_to_ratio(x_min, x_max, y_min, y_max, target_ratio=A4_LANDSCAPE_RATIO):
+    width = x_max - x_min
+    height = y_max - y_min
+
+    if width <= 0 or height <= 0:
+        return x_min, x_max, y_min, y_max
+
+    current_ratio = width / height
+
+    if current_ratio > target_ratio:
+        new_height = width / target_ratio
+        center_y = (y_min + y_max) / 2
+        y_min = center_y - new_height / 2
+        y_max = center_y + new_height / 2
+
+    elif current_ratio < target_ratio:
+        new_width = height * target_ratio
+        center_x = (x_min + x_max) / 2
+        x_min = center_x - new_width / 2
+        x_max = center_x + new_width / 2
+
+    y_min = max(-90.0, y_min)
+    y_max = min(90.0, y_max)
+    x_min = max(-180.0, x_min)
+    x_max = min(180.0, x_max)
+
+    return x_min, x_max, y_min, y_max
+
 
 def apply_view(x_min, x_max, y_min, y_max):
     if x_min >= x_max or y_min >= y_max:
