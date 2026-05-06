@@ -581,7 +581,7 @@ if view_mode == "탐색 모드":
         zoom_snap=0.25,
         zoom_delta=0.25,
         wheel_px_per_zoom_level=180,
-)
+    )
 
     folium.GeoJson(
         world[["ADMIN", "KO", "geometry"]].to_json(),
@@ -611,20 +611,19 @@ if view_mode == "탐색 모드":
         [y_max, x_max]
     ])
 
-A4_MAP_WIDTH = 1200
-A4_MAP_HEIGHT = int(A4_MAP_WIDTH / A4_LANDSCAPE_RATIO)
+    A4_MAP_WIDTH = 1200
+    A4_MAP_HEIGHT = int(A4_MAP_WIDTH / A4_LANDSCAPE_RATIO)
 
-map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
+    map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
 
-with map_col:
-    map_data = st_folium(
-        m,
-        width=A4_MAP_WIDTH,
-        height=A4_MAP_HEIGHT,
-        returned_objects=["bounds"],
-        key="explore_map"
-    )
-
+    with map_col:
+        map_data = st_folium(
+            m,
+            width=A4_MAP_WIDTH,
+            height=A4_MAP_HEIGHT,
+            returned_objects=["bounds"],
+            key="explore_map"
+        )
 
     if map_data and map_data.get("bounds"):
         bounds = map_data["bounds"]
@@ -644,6 +643,7 @@ with map_col:
         st.session_state.explore_view = fit_view_to_ratio(*view_bounds)
 
     st.stop()
+
 
 # -----------------------------
 # 지도 그리기
