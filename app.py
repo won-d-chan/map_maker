@@ -583,7 +583,7 @@ fig_height = fig_width / map_ratio
 
 fig_height = max(4, min(fig_height, 12))
 
-fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+fig, ax = plt.subplots(figsize=(11.69, 8.27))
 
 fig.patch.set_facecolor("#e6e6e6")
 ax.set_facecolor("#e6e6e6")
@@ -774,11 +774,13 @@ elif label_mode == "번호 보이기":
 # -----------------------------
 ax.set_xlim(x_min, x_max)
 ax.set_ylim(y_min, y_max)
+ax.set_aspect("equal", adjustable="box")
 ax.axis("off")
 
 fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
 st.pyplot(fig)
+
 # -----------------------------
 # 다운로드
 # -----------------------------
@@ -791,9 +793,7 @@ fig.savefig(
     png_buf,
     format="png",
     dpi=600,
-    facecolor=fig.get_facecolor(),
-    bbox_inches="tight",
-    pad_inches=0.03
+    facecolor=fig.get_facecolor()
 )
 png_buf.seek(0)
 
@@ -809,9 +809,7 @@ svg_buf = io.BytesIO()
 fig.savefig(
     svg_buf,
     format="svg",
-    facecolor=fig.get_facecolor(),
-    bbox_inches="tight",
-    pad_inches=0.03
+    facecolor=fig.get_facecolor()
 )
 
 svg_buf.seek(0)
@@ -829,10 +827,8 @@ fig.savefig(
     pdf_buf,
     format="pdf",
     facecolor=fig.get_facecolor(),
-    bbox_inches="tight",
-    pad_inches=0.03
+    bbox_inches=None
 )
-
 pdf_buf.seek(0)
 
 with col3:
