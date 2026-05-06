@@ -518,7 +518,7 @@ if view_mode == "탐색 모드":
         name="countries",
         tooltip=folium.GeoJsonTooltip(
             fields=["KO", "ADMIN"],
-            aliases=["국가명", "ADMIN"],
+            aliases=["국가명", "영문명"],
             localize=True,
             sticky=False
         ),
