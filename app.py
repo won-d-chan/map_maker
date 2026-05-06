@@ -21,9 +21,10 @@ with st.expander("사용법 보기", expanded=False):
         - **선으로 빼기**를 켜면 작은 국가의 번호를 바깥으로 분리하고 선으로 연결합니다.
         - **국가 강조**에서 G7, G20, EU 같은 국가 묶음을 색으로 표시할 수 있습니다.
         - **해당 국가만 보기**를 끄면 강조 국가뿐 아니라 다른 국가 이름도 함께 표시됩니다.
-        - 완성된 지도는 '제작 모드'에서 **PNG, SVG, PDF**로 다운로드할 수 있습니다. 
+        - 완성된 지도는 **PNG, SVG, PDF**로 다운로드할 수 있습니다.
         """
     )
+
 
 # -----------------------------
 # 폰트 설정
@@ -432,7 +433,7 @@ with st.sidebar.expander("상세 라벨 설정", expanded=False):
 
     small_area = st.slider(
         "작은 국가 기준",
-        min_value=0.0,
+        min_value=1.0,
         max_value=30.0,
         value=1.0,
         step=0.5
@@ -572,8 +573,16 @@ if view_mode == "탐색 모드":
 
 # -----------------------------
 # 지도 그리기
-# -----------------------------
-fig, ax = plt.subplots(figsize=(14, 8))
+# -----------------------------map_width = x_max - x_min
+map_height = y_max - y_min
+map_ratio = map_width / map_height
+
+fig_width = 14
+fig_height = fig_width / map_ratio
+
+fig_height = max(4, min(fig_height, 12))
+
+fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
 fig.patch.set_facecolor("#e6e6e6")
 ax.set_facecolor("#e6e6e6")
@@ -766,8 +775,9 @@ ax.set_xlim(x_min, x_max)
 ax.set_ylim(y_min, y_max)
 ax.axis("off")
 
-st.pyplot(fig)
+fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
+st.pyplot(fig)
 # -----------------------------
 # 다운로드
 # -----------------------------
@@ -780,7 +790,9 @@ fig.savefig(
     png_buf,
     format="png",
     dpi=600,
-    facecolor=fig.get_facecolor()
+    facecolor=fig.get_facecolor(),
+    bbox_inches="tight",
+    pad_inches=0.03
 )
 png_buf.seek(0)
 
@@ -796,8 +808,11 @@ svg_buf = io.BytesIO()
 fig.savefig(
     svg_buf,
     format="svg",
-    facecolor=fig.get_facecolor()
+    facecolor=fig.get_facecolor(),
+    bbox_inches="tight",
+    pad_inches=0.03
 )
+
 svg_buf.seek(0)
 
 with col2:
@@ -812,8 +827,11 @@ pdf_buf = io.BytesIO()
 fig.savefig(
     pdf_buf,
     format="pdf",
-    facecolor=fig.get_facecolor()
+    facecolor=fig.get_facecolor(),
+    bbox_inches="tight",
+    pad_inches=0.03
 )
+
 pdf_buf.seek(0)
 
 with col3:
