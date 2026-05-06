@@ -6,5 +6,4 @@ streamlit-folium
 geopandas
 shapely
 pyproj
-fiona
 pyogrio
