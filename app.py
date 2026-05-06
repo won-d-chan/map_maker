@@ -130,11 +130,19 @@ def apply_view(x_min, x_max, y_min, y_max):
         st.sidebar.error("좌표 범위가 올바르지 않습니다.")
         return
 
+    x_min, x_max, y_min, y_max = fit_view_to_ratio(
+        x_min,
+        x_max,
+        y_min,
+        y_max
+    )
+
     st.session_state.x_min = x_min
     st.session_state.x_max = x_max
     st.session_state.y_min = y_min
     st.session_state.y_max = y_max
     st.rerun()
+
 
 
 def clamp_view(x_min, x_max, y_min, y_max):
@@ -185,7 +193,9 @@ if view_mode == "탐색 모드":
         )
 
         if st.sidebar.button("탐색 좌표 저장"):
-            st.session_state.saved_view = st.session_state.explore_view
+            st.session_state.saved_view = fit_view_to_ratio(
+                *st.session_state.explore_view
+)
             st.sidebar.success("탐색 좌표 저장 완료")
 
 
@@ -593,12 +603,14 @@ if view_mode == "탐색 모드":
         north = bounds["_northEast"]["lat"]
         east = bounds["_northEast"]["lng"]
 
-        st.session_state.explore_view = clamp_view(
+        view_bounds = clamp_view(
             west,
             east,
             south,
             north
         )
+
+        st.session_state.explore_view = fit_view_to_ratio(*view_bounds)
 
     st.stop()
 
