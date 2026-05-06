@@ -573,7 +573,8 @@ if view_mode == "탐색 모드":
 
 # -----------------------------
 # 지도 그리기
-# -----------------------------map_width = x_max - x_min
+# -----------------------------
+map_width = x_max - x_min
 map_height = y_max - y_min
 map_ratio = map_width / map_height
 
