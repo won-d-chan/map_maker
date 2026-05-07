@@ -7,7 +7,7 @@ import matplotlib.font_manager as fm
 import math
 import folium
 from streamlit_folium import st_folium
-
+from shapely.geometry import box
 
 
 st.set_page_config(page_title="교육용 지도 생성기", layout="wide")
@@ -33,6 +33,33 @@ with st.expander("사용법 보기", expanded=False):
 
 
 # -----------------------------
+# 기본 설정
+# -----------------------------
+A4_LANDSCAPE_RATIO = 297 / 210
+A4_PREVIEW_WIDTH = 1200
+A4_PREVIEW_HEIGHT = int(A4_PREVIEW_WIDTH / A4_LANDSCAPE_RATIO)
+
+
+def utc_label(offset):
+    if offset > 0:
+        return f"UTC+{offset}"
+    if offset < 0:
+        return f"UTC{offset}"
+    return "UTC+0"
+
+
+def utc_offset_from_lon(lon):
+    offset = round(lon / 15)
+
+    if offset < -12:
+        offset = -12
+    if offset > 12:
+        offset = 12
+
+    return offset
+
+
+# -----------------------------
 # 폰트 설정
 # -----------------------------
 FONT_PATH = "fonts/NanumGothic.otf"
@@ -50,10 +77,17 @@ def load_data():
     ko_df = pd.read_csv("country_ko.csv")
     country_ko = dict(zip(ko_df["ADMIN"], ko_df["KO"]))
     world["KO"] = world["ADMIN"].map(country_ko)
+
+    world["UTC"] = world.geometry.representative_point().x.apply(
+        lambda lon: utc_label(utc_offset_from_lon(lon))
+    )
+
     return world
 
 
 world = load_data()
+
+
 
 # -----------------------------
 # 프리셋
@@ -99,9 +133,30 @@ if "saved_view" not in st.session_state:
 if "explore_view" not in st.session_state:
     st.session_state.explore_view = None
 
-A4_LANDSCAPE_RATIO = 297 / 210
-A4_PREVIEW_WIDTH = 1200
-A4_PREVIEW_HEIGHT = int(A4_PREVIEW_WIDTH / A4_LANDSCAPE_RATIO)
+@st.cache_data
+def create_utc_bands():
+    rows = []
+
+    for offset in range(-12, 13):
+        west = offset * 15 - 7.5
+        east = offset * 15 + 7.5
+
+        west = max(-180.0, west)
+        east = min(180.0, east)
+
+        if west >= east:
+            continue
+
+        rows.append({
+            "utc": utc_label(offset),
+            "offset": offset,
+            "geometry": box(west, -90.0, east, 90.0),
+        })
+
+    return gpd.GeoDataFrame(rows, crs="EPSG:4326")
+
+
+utc_bands = create_utc_bands()
 
 
 def fit_view_to_ratio(x_min, x_max, y_min, y_max, target_ratio=A4_LANDSCAPE_RATIO):
@@ -266,6 +321,55 @@ x_min = st.session_state.x_min
 x_max = st.session_state.x_max
 y_min = st.session_state.y_min
 y_max = st.session_state.y_max
+
+
+
+
+# -----------------------------
+# 시차 / 날짜 변경선
+# -----------------------------
+st.sidebar.header("시차 표시")
+
+show_time_lines = st.sidebar.checkbox(
+    "시차 구분선 보기",
+    value=False
+)
+
+show_utc_labels = st.sidebar.checkbox(
+    "UTC 라벨 표시",
+    value=True,
+    disabled=not show_time_lines
+)
+
+show_time_band_hover = st.sidebar.checkbox(
+    "시차 칸 마우스오버 강조",
+    value=False,
+    disabled=not show_time_lines
+)
+
+show_date_line = st.sidebar.checkbox(
+    "날짜 변경선 보기",
+    value=False
+)
+
+time_hover_color = st.sidebar.color_picker(
+    "시차 칸 강조 색상",
+    value="#66ccff"
+)
+
+time_hover_alpha = st.sidebar.slider(
+    "시차 칸 강조 진하기",
+    min_value=0.05,
+    max_value=0.60,
+    value=0.20,
+    step=0.05
+)
+
+if not show_time_lines:
+    show_utc_labels = False
+    show_time_band_hover = False
+
+
 
 # -----------------------------
 # 국가 강조 프리셋
@@ -596,17 +700,18 @@ if view_mode == "탐색 모드":
         wheel_px_per_zoom_level=180,
 )
 
+    tooltip_fields = ["KO", "ADMIN", "UTC"] if show_time_lines else ["KO", "ADMIN"]
+    tooltip_aliases = ["국가명", "영문명", "시차"] if show_time_lines else ["국가명", "영문명"]
+
     folium.GeoJson(
-        world[["ADMIN", "KO", "geometry"]].to_json(),
+        world[["ADMIN", "KO", "UTC", "geometry"]].to_json(),
         name="countries",
         tooltip=folium.GeoJsonTooltip(
-            fields=["KO", "ADMIN"],
-            aliases=["국가명", "영문명"],
+            fields=tooltip_fields,
+            aliases=tooltip_aliases,
             localize=True,
-            sticky=False
+            sticky=True
         ),
-
-
         style_function=lambda feature: {
             "fillColor": (
                 highlight_color
@@ -631,17 +736,107 @@ if view_mode == "탐색 모드":
                 else 0.85
             ),
         },
-
-
-
         highlight_function=lambda feature: {
-            "fillColor": "#ffcc66",
+            "fillColor": (
+                "transparent"
+                if outline_only
+                else "#ffcc66"
+            ),
             "color": "black",
-            "weight": 1.2,
-            "fillOpacity": 0.9,
+            "weight": (
+                0.7
+                if outline_only
+                else 1.2
+            ),
+            "fillOpacity": (
+                0
+                if outline_only
+                else 0.9
+            ),
         },
-
     ).add_to(m)
+
+
+
+    if show_time_lines and show_time_band_hover:
+        folium.GeoJson(
+            utc_bands.to_json(),
+            name="utc_bands",
+            tooltip=folium.GeoJsonTooltip(
+                fields=["utc"],    
+                aliases=["시차"],
+                sticky=True
+            ),
+            style_function=lambda feature: {
+                "fillColor": "transparent",
+                "color": "#555555",
+                "weight": 0.8,
+                "dashArray": "4,6",
+                "fillOpacity": 0,
+            },
+            highlight_function=lambda feature: {
+                "fillColor": time_hover_color,
+                "color": "#222222",
+                "weight": 1.2,
+                "dashArray": "4,6",
+                "fillOpacity": time_hover_alpha,
+            },
+        ).add_to(m)
+
+    elif show_time_lines:
+        for lon in range(-180, 181, 15):
+            if x_min <= lon <= x_max:
+                folium.PolyLine(
+                    locations=[
+                        [-90, lon],
+                        [90, lon],
+                    ],
+                    color="#555555",
+                    weight=0.8,
+                    opacity=0.75,
+                    dash_array="4,6",
+                ).add_to(m)
+
+
+
+
+
+
+
+
+    if show_utc_labels:
+        for _, row in utc_bands.iterrows():
+            point = row.geometry.representative_point()
+
+            if x_min <= point.x <= x_max:
+                folium.Marker(
+                    location=[y_max - ((y_max - y_min) * 0.04), point.x],
+                    icon=folium.DivIcon(
+                        html=f"""
+                        <div style="
+                            font-size: 12px;
+                            color: #333;
+                            background: rgba(255,255,255,0.70);
+                            border-radius: 3px;
+                            padding: 1px 4px;
+                            white-space: nowrap;
+                            transform: translate(-50%, -50%);
+                        ">
+                            {row["utc"]}
+                        </div>
+                        """
+                    )
+                ).add_to(m)
+
+    if show_date_line:
+        folium.PolyLine(
+            locations=[[-90, 180], [90, 180]],
+            color="#d62728",
+            weight=2,
+            opacity=0.9,
+            dash_array="8,8",
+            tooltip="날짜 변경선"
+        ).add_to(m)
 
 
 
@@ -824,6 +1019,77 @@ region.plot(
     edgecolor="black",
     linewidth=0.45
 )
+
+
+# 시차 구분선
+if show_time_lines:
+    for lon in range(-180, 181, 15):
+        if x_min <= lon <= x_max:
+            ax.axvline(
+                lon,
+                color="#555555",
+                linewidth=0.45,
+                linestyle=(0, (4, 6)),
+                alpha=0.65,
+                zorder=3
+            )
+
+    if show_utc_labels:
+        label_y = y_max - ((y_max - y_min) * 0.035)
+
+        for _, row in utc_bands.iterrows():
+            point = row.geometry.representative_point()
+
+            if x_min <= point.x <= x_max:
+                ax.text(
+                    point.x,
+                    label_y,
+                    row["utc"],
+                    fontsize=5.2,
+                    ha="center",
+                    va="center",
+                    color="#333333",
+                    zorder=5,
+                    clip_on=True,
+                    bbox=dict(
+                        boxstyle="round,pad=0.08",
+                        facecolor="white",
+                        edgecolor="none",
+                        alpha=0.65
+                    )
+                )
+
+# 날짜 변경선
+if show_date_line:
+    for lon in [-180, 180]:
+        if x_min <= lon <= x_max:
+            ax.axvline(
+                lon,
+                color="#d62728",
+                linewidth=1.0,
+                linestyle=(0, (8, 8)),
+                alpha=0.9,
+                zorder=6
+            )
+
+            ax.text(
+                lon,
+                y_max - ((y_max - y_min) * 0.08),
+                "날짜 변경선",
+                fontsize=6,
+                ha="center",
+                va="center",
+                color="#d62728",
+                zorder=7,
+                clip_on=True,
+                bbox=dict(
+                    boxstyle="round,pad=0.10",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.75
+                )
+            )
+
 
 # 강조 국가
 if highlight_names:
