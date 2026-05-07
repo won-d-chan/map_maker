@@ -650,7 +650,7 @@ highlight_preset_name = st.sidebar.selectbox(
 
 highlight_color = st.sidebar.color_picker(
     "강조 색상",
-    value="#ffcc66"
+    value="#bbf99c"
 )
 
 highlight_alpha = st.sidebar.slider(
