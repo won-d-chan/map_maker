@@ -18,14 +18,18 @@ with st.expander("사용법 보기", expanded=False):
         """
         - **탐색 모드**에서 지도를 확대/이동해 원하는 범위를 찾고 **탐색 좌표 저장**을 누릅니다.
         - **제작 모드**에서 **저장 좌표 불러오기**를 누르면 탐색한 범위가 적용됩니다.
+        - 탐색 모드와 제작 모드는 **A4 가로 비율**에 맞춰 표시되므로, 탐색 화면을 기준으로 출력 구도를 잡을 수 있습니다.
         - **지도 프리셋**은 세계지도, 유럽, 아시아 등 기본 범위를 빠르게 적용할 때 사용합니다.
         - **라벨 설정**에서 지도만 보기, 국가명 보이기, 번호 보이기를 선택할 수 있습니다.
         - **선으로 빼기**를 켜면 작은 국가의 번호를 바깥으로 분리하고 선으로 연결합니다.
-        - **국가 강조**에서 G7, G20, EU 같은 국가 묶음을 색으로 표시할 수 있습니다.
+        - 탐색 모드에서도 국가명/번호 표시를 미리 확인할 수 있습니다.
+        - **국가 강조**에서 G7, G20, EU, NATO 같은 국가 묶음을 색으로 표시할 수 있습니다.
         - **해당 국가만 보기**를 끄면 강조 국가뿐 아니라 다른 국가 이름도 함께 표시됩니다.
+        - 탐색 모드의 **국경선만 보기**를 켜면 배경 지도 위에 국경선만 표시해 지형과 위치를 확인할 수 있습니다.
         - 완성된 지도는 **PNG, SVG, PDF**로 다운로드할 수 있습니다.
         """
     )
+
 
 
 # -----------------------------
@@ -189,7 +193,10 @@ current_bounds = (
     st.session_state.x_max,
     st.session_state.y_min,
     st.session_state.y_max
+    
+
 )
+outline_only = False
 
 if st.sidebar.button("프리셋 좌표 적용"):
     apply_view(
@@ -204,6 +211,10 @@ if st.sidebar.button("프리셋 좌표 적용"):
 # 탐색 모드: 실제 화면 bounds 저장
 # =============================
 if view_mode == "탐색 모드":
+    outline_only = st.sidebar.checkbox(
+        "국경선만 보기",
+        value=False
+    )
 
     st.sidebar.header("탐색 좌표")
 
@@ -594,19 +605,173 @@ if view_mode == "탐색 모드":
             localize=True,
             sticky=False
         ),
+
+
         style_function=lambda feature: {
-            "fillColor": "white",
+            "fillColor": (
+                highlight_color
+                if feature["properties"]["ADMIN"] in highlight_names
+                else "transparent"
+                if outline_only
+                else "white"
+            ),
             "color": "black",
-            "weight": 0.6,
-            "fillOpacity": 0.85,
+            "weight": (
+                0.9
+                if feature["properties"]["ADMIN"] in highlight_names
+                else 0.7
+                if outline_only
+                else 0.6
+            ),
+            "fillOpacity": (
+                highlight_alpha
+                if feature["properties"]["ADMIN"] in highlight_names
+                else 0
+                if outline_only
+                else 0.85
+            ),
         },
+
+
+
         highlight_function=lambda feature: {
             "fillColor": "#ffcc66",
             "color": "black",
             "weight": 1.2,
             "fillOpacity": 0.9,
         },
+
     ).add_to(m)
+
+
+
+    # 탐색 모드 라벨 표시
+    if label_mode == "국가명 보이기":
+
+        for _, row in region.iterrows():
+
+            if highlight_names and show_highlight_only:
+                if row["ADMIN"] not in highlight_names:
+                    continue
+
+            if pd.isna(row["KO"]):
+                continue
+
+            if (
+                row.geometry.area < small_area
+                and row["ADMIN"] not in must_show
+            ):
+                continue
+
+            point = row.geometry.representative_point()
+
+            folium.Marker(
+                location=[point.y, point.x],
+                icon=folium.DivIcon(
+                    html=f"""
+                    <div style="
+                        font-size: {label_font_size + 3}px;
+                        color: black;
+                        background: rgba(255, 255, 255, 0.72);
+                        border-radius: 4px;
+                        padding: 1px 4px;
+                        white-space: nowrap;
+                        transform: translate(-50%, -50%);
+                    ">
+                        {row["KO"]}
+                    </div>
+                    """
+                )
+            ).add_to(m)
+
+    elif label_mode == "번호 보이기":
+
+        explore_labels = []
+
+        for _, row in region.iterrows():
+            point = row.geometry.representative_point()
+
+            x = point.x
+            y = point.y
+            area = row.geometry.area
+            continent = row["CONTINENT"]
+
+            label_x = x
+            label_y = y
+
+            if use_leader_lines and area < small_area:
+                dx, dy = 0, 0
+
+                if continent in ["North America", "South America"]:
+                    dx, dy = -7, 0
+                elif continent in ["Europe", "Asia", "Africa"]:
+                    if x > 20:
+                        dx, dy = 7, 0
+                    elif x < -10:
+                        dx, dy = -7, 0
+                    else:
+                        dx, dy = 0, 6
+                elif continent == "Oceania":
+                    dx, dy = 7, -2
+                else:
+                    dx, dy = 6, 0
+
+                label_x = x + dx
+                label_y = y + dy
+
+            explore_labels.append({
+                "num": row["NUM"],
+                "anchor_x": x,
+                "anchor_y": y,
+                "label_x": label_x,
+                "label_y": label_y,
+            })
+
+        if use_leader_lines:
+            for item in explore_labels:
+                moved_distance = math.sqrt(
+                    (item["label_x"] - item["anchor_x"]) ** 2 +
+                    (item["label_y"] - item["anchor_y"]) ** 2
+                )
+
+                if moved_distance > 1.2:
+                    folium.PolyLine(
+                        locations=[
+                            [item["anchor_y"], item["anchor_x"]],
+                            [item["label_y"], item["label_x"]],
+                        ],
+                        color="black",
+                        weight=leader_line_width,
+                        opacity=leader_line_alpha,
+                    ).add_to(m)
+
+        for item in explore_labels:
+            folium.Marker(
+                location=[item["label_y"], item["label_x"]],
+                icon=folium.DivIcon(
+                    html=f"""
+                    <div style="
+                        width: 18px;
+                        height: 18px;
+                        line-height: 18px;
+                        border-radius: 50%;
+                        border: 1px solid black;
+                        background: rgba(255, 255, 255, 0.97);
+                        color: black;
+                        font-size: {number_font_size + 4}px;
+                        text-align: center;
+                        font-weight: 600;
+                        transform: translate(-50%, -50%);
+                    ">
+                        {item["num"]}
+                    </div>
+                    """
+                )
+            ).add_to(m)
+
+
+
+
 
     m.fit_bounds([
         [y_min, x_min],
