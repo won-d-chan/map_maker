@@ -96,6 +96,8 @@ if "explore_view" not in st.session_state:
     st.session_state.explore_view = None
 
 A4_LANDSCAPE_RATIO = 297 / 210
+A4_PREVIEW_WIDTH = 1200
+A4_PREVIEW_HEIGHT = int(A4_PREVIEW_WIDTH / A4_LANDSCAPE_RATIO)
 
 
 def fit_view_to_ratio(x_min, x_max, y_min, y_max, target_ratio=A4_LANDSCAPE_RATIO):
@@ -611,13 +613,17 @@ if view_mode == "탐색 모드":
         [y_max, x_max]
     ])
 
-    map_data = st_folium(
+    map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
+
+    with map_col:
+      map_data = st_folium(
         m,
-        height=700,
-        use_container_width=True,
+        width=A4_PREVIEW_WIDTH,
+        height=A4_PREVIEW_HEIGHT,
         returned_objects=["bounds"],
         key="explore_map"
     )
+
 
     if map_data and map_data.get("bounds"):
         bounds = map_data["bounds"]
@@ -641,14 +647,6 @@ if view_mode == "탐색 모드":
 # -----------------------------
 # 지도 그리기
 # -----------------------------
-map_width = x_max - x_min
-map_height = y_max - y_min
-map_ratio = map_width / map_height
-
-fig_width = 14
-fig_height = fig_width / map_ratio
-
-fig_height = max(4, min(fig_height, 12))
 
 fig, ax = plt.subplots(figsize=(11.69, 8.27))
 
@@ -855,12 +853,13 @@ fig.savefig(
 )
 preview_buf.seek(0)
 
+
 preview_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
 
 with preview_col:
     st.image(
         preview_buf,
-        width=1200
+        width=A4_PREVIEW_WIDTH
     )
 
 
