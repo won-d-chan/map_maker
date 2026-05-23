@@ -8,7 +8,9 @@ import math
 import folium
 from streamlit_folium import st_folium
 from shapely.geometry import box
-
+from folium.plugins import Draw
+from PIL import Image
+from streamlit_drawable_canvas import st_canvas
 
 st.set_page_config(page_title="교육용 지도 생성기", layout="wide")
 st.title("교육용 지도 생성기")
@@ -17,10 +19,9 @@ with st.expander("사용법 보기", expanded=False):
     st.markdown(
         """
         - **탐색 모드**에서 지도를 확대/이동해 원하는 범위를 찾고 **탐색 좌표 저장**을 누릅니다.
-        - **제작 모드**에서 **저장 좌표 불러오기**를 누르면 탐색한 범위가 적용되며, 파일로 저장할 수 있습니다.
+        - **제작 모드**에서 **저장 좌표 불러오기**를 누르면 탐색한 범위가 적용됩니다.
         - 탐색 모드와 제작 모드는 **A4 가로 비율**에 맞춰 표시되므로, 탐색 화면을 기준으로 출력 구도를 잡을 수 있습니다.
         - **지도 프리셋**은 세계지도, 유럽, 아시아 등 기본 범위를 빠르게 적용할 때 사용합니다.
-        - **국경선만 보기**를 켜면 탐색 모드에서 배경 지도 위에 국경선만 표시해 지형과 위치를 확인할 수 있습니다.
         - **라벨 설정**에서 지도만 보기, 국가명 보이기, 번호 보이기를 선택할 수 있습니다.
         - **선으로 빼기**를 켜면 작은 국가의 번호를 바깥으로 분리하고 선으로 연결합니다.
         - 탐색 모드에서도 국가명/번호 표시를 미리 확인할 수 있습니다.
@@ -29,14 +30,11 @@ with st.expander("사용법 보기", expanded=False):
         - **시차 구분선 보기**를 켜면 15도 경도 간격의 이론적 시차 구분선을 표시합니다.
         - **UTC 라벨 표시**를 켜면 각 시차 구간의 UTC 기준 시간을 지도 위에 표시합니다.
         - **시차 칸 마우스오버 강조**를 켜면 탐색 모드에서 마우스를 올린 시차 구간이 색으로 강조되고 시차 팝업이 표시됩니다.
-        - 시차 구분선은 교육용 이론 기준선이며, 실제 국가별 표준시 경계와 다를 수 있습니다.
         - **날짜 변경선 보기**를 켜면 180도 경선 기준의 날짜 변경선을 표시합니다.
+        - **빨간펜 모드**를 켜면 현재 탐색 화면을 고정한 상태에서 지도 위에 선을 그릴 수 있습니다.
         - 완성된 지도는 **PNG, SVG, PDF**로 다운로드할 수 있습니다.
         """
     )
-
-
-
 
 # -----------------------------
 # 기본 설정
@@ -63,6 +61,26 @@ def utc_offset_from_lon(lon):
         offset = 12
 
     return offset
+
+
+def estimate_zoom(x_min, x_max, y_min, y_max):
+    width = x_max - x_min
+    height = y_max - y_min
+    span = max(width, height)
+
+    if span >= 250:
+        return 2
+    if span >= 120:
+        return 3
+    if span >= 60:
+        return 4
+    if span >= 30:
+        return 5
+    if span >= 15:
+        return 6
+    if span >= 8:
+        return 7
+    return 8
 
 
 # -----------------------------
@@ -93,8 +111,6 @@ def load_data():
 
 world = load_data()
 
-
-
 # -----------------------------
 # 프리셋
 # -----------------------------
@@ -112,7 +128,7 @@ st.sidebar.header("지도 프리셋")
 
 view_mode = st.sidebar.radio(
     "작업 모드",
-    ["제작 모드", "탐색 모드"],
+    ["제작 모드", "탐색 모드", "판서 모드"],
     index=0
 )
 
@@ -125,7 +141,7 @@ preset_name = st.sidebar.selectbox(
 preset_x_min, preset_x_max, preset_y_min, preset_y_max = presets[preset_name]
 
 # -----------------------------
-# 지도 범위 / 세션 상태
+# 세션 상태
 # -----------------------------
 if "x_min" not in st.session_state:
     st.session_state.x_min = preset_x_min
@@ -138,6 +154,24 @@ if "saved_view" not in st.session_state:
 
 if "explore_view" not in st.session_state:
     st.session_state.explore_view = None
+
+if "pen_drawings" not in st.session_state:
+    st.session_state.pen_drawings = []
+
+if "map_center" not in st.session_state:
+    st.session_state.map_center = [
+        (st.session_state.y_min + st.session_state.y_max) / 2,
+        (st.session_state.x_min + st.session_state.x_max) / 2,
+    ]
+
+if "map_zoom" not in st.session_state:
+    st.session_state.map_zoom = estimate_zoom(
+        st.session_state.x_min,
+        st.session_state.x_max,
+        st.session_state.y_min,
+        st.session_state.y_max
+    )
+
 
 @st.cache_data
 def create_utc_bands():
@@ -215,7 +249,6 @@ def fit_view_to_ratio(x_min, x_max, y_min, y_max, target_ratio=A4_LANDSCAPE_RATI
     return x_min, x_max, y_min, y_max
 
 
-
 def apply_view(x_min, x_max, y_min, y_max):
     if x_min >= x_max or y_min >= y_max:
         st.sidebar.error("좌표 범위가 올바르지 않습니다.")
@@ -232,8 +265,15 @@ def apply_view(x_min, x_max, y_min, y_max):
     st.session_state.x_max = x_max
     st.session_state.y_min = y_min
     st.session_state.y_max = y_max
-    st.rerun()
+    st.session_state.explore_view = (x_min, x_max, y_min, y_max)
 
+    st.session_state.map_center = [
+        (y_min + y_max) / 2,
+        (x_min + x_max) / 2,
+    ]
+    st.session_state.map_zoom = estimate_zoom(x_min, x_max, y_min, y_max)
+
+    st.rerun()
 
 
 def clamp_view(x_min, x_max, y_min, y_max):
@@ -253,11 +293,11 @@ current_bounds = (
     st.session_state.x_min,
     st.session_state.x_max,
     st.session_state.y_min,
-    st.session_state.y_max
-    
-
+    st.session_state.y_max,
 )
+
 outline_only = False
+pen_mode = False
 
 if st.sidebar.button("프리셋 좌표 적용"):
     apply_view(
@@ -267,7 +307,6 @@ if st.sidebar.button("프리셋 좌표 적용"):
         preset_y_max
     )
 
-
 # =============================
 # 탐색 모드: 실제 화면 bounds 저장
 # =============================
@@ -276,6 +315,15 @@ if view_mode == "탐색 모드":
         "국경선만 보기",
         value=False
     )
+
+    pen_mode = st.sidebar.checkbox(
+        "빨간펜 모드",
+        value=False
+    )
+
+    if st.sidebar.button("빨간펜 지우기"):
+        st.session_state.pen_drawings = []
+        st.rerun()
 
     st.sidebar.header("탐색 좌표")
 
@@ -293,14 +341,13 @@ if view_mode == "탐색 모드":
         if st.sidebar.button("탐색 좌표 저장"):
             st.session_state.saved_view = fit_view_to_ratio(
                 *st.session_state.explore_view
-)
+            )
             st.sidebar.success("탐색 좌표 저장 완료")
-
 
 # =============================
 # 제작 모드: 저장 좌표 불러오기
 # =============================
-if view_mode == "제작 모드":
+if view_mode in ["제작 모드", "판서 모드"]:
 
     st.sidebar.header("저장된 탐색 좌표")
 
@@ -322,12 +369,33 @@ if view_mode == "제작 모드":
                 saved_y_max
             )
 
-
 x_min = st.session_state.x_min
 x_max = st.session_state.x_max
 y_min = st.session_state.y_min
 y_max = st.session_state.y_max
 
+
+# -----------------------------
+# 판서 설정
+# -----------------------------
+if view_mode == "판서 모드":
+    st.sidebar.header("판서 설정")
+
+    board_pen_color = st.sidebar.color_picker(
+        "펜 색상",
+        value="#d62728"
+    )
+
+    board_pen_width = st.sidebar.slider(
+        "펜 굵기",
+        min_value=1,
+        max_value=20,
+        value=4,
+        step=1
+    )
+else:
+    board_pen_color = "#d62728"
+    board_pen_width = 4
 
 
 
@@ -375,14 +443,11 @@ if not show_time_lines:
     show_utc_labels = False
     show_time_band_hover = False
 
-
-
 # -----------------------------
 # 국가 강조 프리셋
 # -----------------------------
 highlight_presets = {
     "없음": [],
-
     "G7": [
         "Canada",
         "France",
@@ -392,7 +457,6 @@ highlight_presets = {
         "United Kingdom",
         "United States of America",
     ],
-
     "G20": [
         "Argentina",
         "Australia",
@@ -414,7 +478,6 @@ highlight_presets = {
         "United Kingdom",
         "United States of America",
     ],
-
     "EU": [
         "Austria",
         "Belgium",
@@ -444,7 +507,6 @@ highlight_presets = {
         "Spain",
         "Sweden",
     ],
-
     "NATO": [
         "Albania",
         "Belgium",
@@ -479,7 +541,6 @@ highlight_presets = {
         "United Kingdom",
         "United States of America",
     ],
-
     "BRICS": [
         "Brazil",
         "Russia",
@@ -491,7 +552,6 @@ highlight_presets = {
         "Iran",
         "United Arab Emirates",
     ],
-
     "ASEAN": [
         "Brunei",
         "Cambodia",
@@ -504,13 +564,11 @@ highlight_presets = {
         "Thailand",
         "Vietnam",
     ],
-
     "발트 3국": [
         "Estonia",
         "Latvia",
         "Lithuania",
     ],
-
     "북유럽": [
         "Norway",
         "Sweden",
@@ -518,13 +576,290 @@ highlight_presets = {
         "Denmark",
         "Iceland",
     ],
-
     "한중일": [
         "South Korea",
         "China",
         "Japan",
     ],
+
+    "영국 제국": [
+        "Canada",
+        "United States of America",
+        "Australia",
+        "New Zealand",
+        "India",
+        "Pakistan",
+        "Bangladesh",
+        "Myanmar",
+        "Sri Lanka",
+        "Malaysia",
+        "Singapore",
+        "Brunei",
+        "South Africa",
+        "Egypt",
+        "Sudan",
+        "South Sudan",
+        "Kenya",
+        "Uganda",
+        "Tanzania",
+        "Nigeria",
+        "Ghana",
+        "Sierra Leone",
+        "Gambia",
+        "Botswana",
+        "Zimbabwe",
+        "Zambia",
+        "Malawi",
+        "Lesotho",
+        "Eswatini",
+        "Namibia",
+        "Iraq",
+        "Jordan",
+        "Israel",
+        "Cyprus",
+        "Malta",
+        "Jamaica",
+        "Trinidad and Tobago",
+        "The Bahamas",
+        "Guyana",
+        "Belize",
+    ],
+
+    "프랑스 식민제국": [
+        "Canada",
+        "Haiti",
+        "Algeria",
+        "Morocco",
+        "Tunisia",
+        "Mauritania",
+        "Mali",
+        "Senegal",
+        "Guinea",
+        "Côte d'Ivoire",
+        "Burkina Faso",
+        "Niger",
+        "Benin",
+        "Chad",
+        "Central African Republic",
+        "Republic of Congo",
+        "Gabon",
+        "Cameroon",
+        "Madagascar",
+        "Djibouti",
+        "Syria",
+        "Lebanon",
+        "Vietnam",
+        "Laos",
+        "Cambodia",
+    ],
+
+    "스페인 제국": [
+        "Mexico",
+        "Guatemala",
+        "Belize",
+        "El Salvador",
+        "Honduras",
+        "Nicaragua",
+        "Costa Rica",
+        "Panama",
+        "Cuba",
+        "Dominican Republic",
+        "Colombia",
+        "Venezuela",
+        "Ecuador",
+        "Peru",
+        "Bolivia",
+        "Chile",
+        "Argentina",
+        "Paraguay",
+        "Uruguay",
+        "Philippines",
+        "Equatorial Guinea",
+        "Western Sahara",
+    ],
+
+    "포르투갈 제국": [
+        "Brazil",
+        "Angola",
+        "Mozambique",
+        "Guinea-Bissau",
+        "Cape Verde",
+        "São Tomé and Principe",
+        "East Timor",
+    ],
+
+    "네덜란드 식민제국": [
+        "Indonesia",
+        "Suriname",
+        "South Africa",
+        "Sri Lanka",
+    ],
+
+    "벨기에 식민제국": [
+        "Democratic Republic of the Congo",
+        "Rwanda",
+        "Burundi",
+    ],
+
+    "독일 식민제국": [
+        "Namibia",
+        "Tanzania",
+        "Cameroon",
+        "Togo",
+        "Papua New Guinea",
+        "Samoa",
+        "Nauru",
+    ],
+
+    "이탈리아 식민제국": [
+        "Libya",
+        "Eritrea",
+        "Somalia",
+        "Ethiopia",
+        "Albania",
+    ],
+
+    "일본 제국": [
+        "South Korea",
+        "North Korea",
+        "Taiwan",
+        "China",
+    ],
+
+    "식민 지배 지역 전체": [
+        "Canada",
+        "United States of America",
+        "Australia",
+        "New Zealand",
+        "India",
+        "Pakistan",
+        "Bangladesh",
+        "Myanmar",
+        "Sri Lanka",
+        "Malaysia",
+        "Singapore",
+        "Brunei",
+        "South Africa",
+        "Egypt",
+        "Sudan",
+        "South Sudan",
+        "Kenya",
+        "Uganda",
+        "Tanzania",
+        "Nigeria",
+        "Ghana",
+        "Sierra Leone",
+        "Gambia",
+        "Botswana",
+        "Zimbabwe",
+        "Zambia",
+        "Malawi",
+        "Lesotho",
+        "Eswatini",
+        "Namibia",
+        "Iraq",
+        "Jordan",
+        "Israel",
+        "Cyprus",
+        "Malta",
+        "Jamaica",
+        "Trinidad and Tobago",
+        "The Bahamas",
+        "Guyana",
+        "Belize",
+        "Haiti",
+        "Algeria",
+        "Morocco",
+        "Tunisia",
+        "Mauritania",
+        "Mali",
+        "Senegal",
+        "Guinea",
+        "Côte d'Ivoire",
+        "Burkina Faso",
+        "Niger",
+        "Benin",
+        "Chad",
+        "Central African Republic",
+        "Republic of Congo",
+        "Gabon",
+        "Cameroon",
+        "Madagascar",
+        "Djibouti",
+        "Syria",
+        "Lebanon",
+        "Vietnam",
+        "Laos",
+        "Cambodia",
+        "Mexico",
+        "Guatemala",
+        "El Salvador",
+        "Honduras",
+        "Nicaragua",
+        "Costa Rica",
+        "Panama",
+        "Cuba",
+        "Dominican Republic",
+        "Colombia",
+        "Venezuela",
+        "Ecuador",
+        "Peru",
+        "Bolivia",
+        "Chile",
+        "Argentina",
+        "Paraguay",
+        "Uruguay",
+        "Philippines",
+        "Equatorial Guinea",
+        "Western Sahara",
+        "Brazil",
+        "Angola",
+        "Mozambique",
+        "Guinea-Bissau",
+        "Cape Verde",
+        "São Tomé and Principe",
+        "East Timor",
+        "Indonesia",
+        "Suriname",
+        "Democratic Republic of the Congo",
+        "Rwanda",
+        "Burundi",
+        "Togo",
+        "Papua New Guinea",
+        "Samoa",
+        "Nauru",
+        "Libya",
+        "Eritrea",
+        "Somalia",
+        "Ethiopia",
+        "Albania",
+        "South Korea",
+        "North Korea",
+        "Taiwan",
+        "China",
+    ],
+
 }
+
+colonial_colors = {
+    "영국 제국": "#d73027",
+    "프랑스 식민제국": "#4575b4",
+    "스페인 제국": "#fdae61",
+    "포르투갈 제국": "#1a9850",
+    "네덜란드 식민제국": "#984ea3",
+    "벨기에 식민제국": "#8c510a",
+    "독일 식민제국": "#4d4d4d",
+    "이탈리아 식민제국": "#66c2a5",
+    "일본 제국": "#e7298a",
+}
+
+colonial_owner_by_country = {}
+
+for owner_name in colonial_colors:
+    for country_name in highlight_presets.get(owner_name, []):
+        colonial_owner_by_country[country_name] = owner_name
+
+
 
 # -----------------------------
 # 항상 표시할 국가
@@ -648,9 +983,42 @@ with st.sidebar.expander("상세 라벨 설정", expanded=False):
 # -----------------------------
 st.sidebar.header("국가 강조")
 
+highlight_preset_groups = {
+    "연합/지역 그룹": [
+        "없음",
+        "G7",
+        "G20",
+        "EU",
+        "NATO",
+        "BRICS",
+        "ASEAN",
+        "발트 3국",
+        "북유럽",
+        "한중일",
+    ],
+    "식민지배 영토": [
+        "영국 제국",
+        "프랑스 식민제국",
+        "스페인 제국",
+        "포르투갈 제국",
+        "네덜란드 식민제국",
+        "벨기에 식민제국",
+        "독일 식민제국",
+        "이탈리아 식민제국",
+        "일본 제국",
+        "식민 지배 지역 전체",
+    ],
+}
+
+highlight_group_name = st.sidebar.selectbox(
+    "프리셋 분류",
+    list(highlight_preset_groups.keys()),
+    index=0
+)
+
 highlight_preset_name = st.sidebar.selectbox(
     "강조 프리셋",
-    list(highlight_presets.keys()),
+    highlight_preset_groups[highlight_group_name],
     index=0
 )
 
@@ -667,6 +1035,15 @@ highlight_alpha = st.sidebar.slider(
     step=0.05
 )
 
+use_colonial_owner_colors = st.sidebar.checkbox(
+    "지배국가별 색상",
+    value=True,
+    disabled=(highlight_preset_name != "식민 지배 지역 전체")
+)
+
+if highlight_preset_name != "식민 지배 지역 전체":
+    use_colonial_owner_colors = False
+
 show_highlight_only = st.sidebar.checkbox(
     "해당 국가만 보기",
     value=True,
@@ -675,9 +1052,31 @@ show_highlight_only = st.sidebar.checkbox(
 
 highlight_names = highlight_presets[highlight_preset_name]
 
+show_colonial_legend = (
+    highlight_preset_name == "식민 지배 지역 전체"
+    and use_colonial_owner_colors
+)
+
 if highlight_preset_name == "없음":
     show_highlight_only = False
 
+colonial_preset_names = [
+    "영국 제국",
+    "프랑스 식민제국",
+    "스페인 제국",
+    "포르투갈 제국",
+    "네덜란드 식민제국",
+    "벨기에 식민제국",
+    "독일 식민제국",
+    "이탈리아 식민제국",
+    "일본 제국",
+    "식민 지배 지역 전체",
+]
+
+if highlight_group_name == "식민지배 영토":
+    st.caption(
+        "식민제국 프리셋은 현대 국가 경계 기준의 개략 표시입니다. 지배국가별 색상은 대표 지배국 기준이며, 실제 지배 시기와 경계는 지역별로 다를 수 있습니다."
+    )
 
 # -----------------------------
 # 지도 범위 데이터
@@ -694,17 +1093,18 @@ if view_mode == "탐색 모드":
 
     st.subheader("탐색 모드")
 
-    center = get_center(current_bounds)
-
     m = folium.Map(
-        location=center,
-        zoom_start=2,
+        location=st.session_state.map_center,
+        zoom_start=st.session_state.map_zoom,
         tiles="cartodbpositron",
         zoom_control=True,
         zoom_snap=0.25,
         zoom_delta=0.25,
         wheel_px_per_zoom_level=180,
-)
+        dragging=not pen_mode,
+        scrollWheelZoom=not pen_mode,
+        doubleClickZoom=not pen_mode,
+    )
 
     tooltip_fields = ["KO", "ADMIN", "UTC"] if show_time_lines else ["KO", "ADMIN"]
     tooltip_aliases = ["국가명", "영문명", "시차"] if show_time_lines else ["국가명", "영문명"]
@@ -720,7 +1120,12 @@ if view_mode == "탐색 모드":
         ),
         style_function=lambda feature: {
             "fillColor": (
-                highlight_color
+                colonial_colors.get(
+                    colonial_owner_by_country.get(feature["properties"]["ADMIN"])
+                )
+                if use_colonial_owner_colors
+                and feature["properties"]["ADMIN"] in colonial_owner_by_country
+                else highlight_color
                 if feature["properties"]["ADMIN"] in highlight_names
                 else "transparent"
                 if outline_only
@@ -762,14 +1167,12 @@ if view_mode == "탐색 모드":
         },
     ).add_to(m)
 
-
-
     if show_time_lines and show_time_band_hover:
         folium.GeoJson(
             utc_bands.to_json(),
             name="utc_bands",
             tooltip=folium.GeoJsonTooltip(
-                fields=["utc"],    
+                fields=["utc"],
                 aliases=["시차"],
                 sticky=True
             ),
@@ -802,13 +1205,6 @@ if view_mode == "탐색 모드":
                     opacity=0.75,
                     dash_array="4,6",
                 ).add_to(m)
-
-
-
-
-
-
-
 
     if show_utc_labels:
         for _, row in utc_bands.iterrows():
@@ -844,9 +1240,6 @@ if view_mode == "탐색 모드":
             tooltip="날짜 변경선"
         ).add_to(m)
 
-
-
-    # 탐색 모드 라벨 표시
     if label_mode == "국가명 보이기":
 
         for _, row in region.iterrows():
@@ -970,50 +1363,135 @@ if view_mode == "탐색 모드":
                 )
             ).add_to(m)
 
+    if st.session_state.pen_drawings:
+        folium.GeoJson(
+            {
+                "type": "FeatureCollection",
+                "features": st.session_state.pen_drawings,
+            },
+            name="pen_drawings",
+            style_function=lambda feature: {
+                "color": "#d62728",
+                "weight": 4,
+                "opacity": 0.9,
+            },
+        ).add_to(m)
+
+    if pen_mode:
+        Draw(
+            export=False,
+            position="topleft",
+            draw_options={
+                "polyline": {
+                    "shapeOptions": {
+                        "color": "#d62728",
+                        "weight": 4,
+                        "opacity": 0.9,
+                    }
+                },
+                "polygon": False,
+                "rectangle": False,
+                "circle": False,
+                "marker": False,
+                "circlemarker": False,
+            },
+            edit_options={
+                "edit": True,
+                "remove": True,
+            },
+        ).add_to(m)
+
+        st.info("빨간펜 모드: 왼쪽의 선 그리기 아이콘을 누른 뒤 지도 위에 점을 찍어 선을 그립니다. 더블클릭하면 선이 끝납니다.")
 
 
+    if pen_mode and st.session_state.explore_view is not None:
+        pen_x_min, pen_x_max, pen_y_min, pen_y_max = st.session_state.explore_view
+
+        m.fit_bounds([
+            [pen_y_min, pen_x_min],
+            [pen_y_max, pen_x_max],
+        ])
+
+    if show_colonial_legend:
+        legend_items = ""
+
+        for owner_name, owner_color in colonial_colors.items():
+            legend_items += f"""
+            <div style="display: flex; align-items: center; gap: 6px; margin: 2px 0;">
+                <span style="
+                    width: 12px;
+                    height: 12px;
+                    background: {owner_color};
+                    border: 1px solid #333;
+                    display: inline-block;
+                "></span>
+                <span>{owner_name}</span>
+            </div>
+            """
+
+        legend_html = f"""
+        <div style="
+            position: fixed;
+            left: 18px;
+            bottom: 28px;
+            z-index: 9999;
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid rgba(0, 0, 0, 0.25);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #111;
+            line-height: 1.2;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+        ">
+            <div style="font-weight: 700; margin-bottom: 4px;">지배국</div>
+            {legend_items}
+        </div>
+        """
+
+        m.get_root().html.add_child(folium.Element(legend_html))
 
 
-    m.fit_bounds([
-        [y_min, x_min],
-        [y_max, x_max]
-    ])
 
     map_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
 
     with map_col:
-      map_data = st_folium(
-        m,
-        width=A4_PREVIEW_WIDTH,
-        height=A4_PREVIEW_HEIGHT,
-        returned_objects=["bounds"],
-        key="explore_map"
-    )
-
-
-    if map_data and map_data.get("bounds"):
-        bounds = map_data["bounds"]
-
-        south = bounds["_southWest"]["lat"]
-        west = bounds["_southWest"]["lng"]
-        north = bounds["_northEast"]["lat"]
-        east = bounds["_northEast"]["lng"]
-
-        view_bounds = clamp_view(
-            west,
-            east,
-            south,
-            north
+        map_data = st_folium(
+            m,
+            width=A4_PREVIEW_WIDTH,
+            height=A4_PREVIEW_HEIGHT,
+            returned_objects=["bounds", "all_drawings"],
+            key=f"explore_map_{'pen' if pen_mode else 'move'}"
         )
 
-        st.session_state.explore_view = fit_view_to_ratio(*view_bounds)
+
+    if map_data:
+       
+        if map_data.get("bounds") and not pen_mode:
+            bounds = map_data["bounds"]
+
+            south = bounds["_southWest"]["lat"]
+            west = bounds["_southWest"]["lng"]
+            north = bounds["_northEast"]["lat"]
+            east = bounds["_northEast"]["lng"]
+
+            view_bounds = clamp_view(
+                west,
+                east,
+                south,
+                north
+            )
+        if not pen_mode:
+            st.session_state.explore_view = fit_view_to_ratio(*view_bounds)
+
+        if pen_mode and map_data.get("all_drawings"):
+            st.session_state.pen_drawings = map_data["all_drawings"]
 
     st.stop()
 
 # -----------------------------
 # 지도 그리기
 # -----------------------------
-
 fig, ax = plt.subplots(figsize=(11.69, 8.27))
 
 fig.patch.set_facecolor("#e6e6e6")
@@ -1025,7 +1503,6 @@ region.plot(
     edgecolor="black",
     linewidth=0.45
 )
-
 
 # 시차 구분선
 if show_time_lines:
@@ -1096,19 +1573,102 @@ if show_date_line:
                 )
             )
 
-
 # 강조 국가
 if highlight_names:
-    highlight_region = region[region["ADMIN"].isin(highlight_names)]
 
-    if not highlight_region.empty:
-        highlight_region.plot(
-            ax=ax,
-            color=highlight_color,
-            edgecolor="black",
-            linewidth=0.65,
-            alpha=highlight_alpha
+    if use_colonial_owner_colors:
+        colonial_region = region[
+            region["ADMIN"].isin(colonial_owner_by_country.keys())
+        ].copy()
+
+        colonial_region["COLONIAL_OWNER"] = colonial_region["ADMIN"].map(
+            colonial_owner_by_country
         )
+
+        for owner_name, owner_color in colonial_colors.items():
+            owner_region = colonial_region[
+                colonial_region["COLONIAL_OWNER"] == owner_name
+            ]
+
+            if not owner_region.empty:
+                owner_region.plot(
+                    ax=ax,
+                    color=owner_color,
+                    edgecolor="black",
+                    linewidth=0.65,
+                    alpha=highlight_alpha
+                )
+
+    else:
+        highlight_region = region[region["ADMIN"].isin(highlight_names)]
+
+        if not highlight_region.empty:
+            highlight_region.plot(
+                ax=ax,
+                color=highlight_color,
+                edgecolor="black",
+                linewidth=0.65,
+                alpha=highlight_alpha
+            )
+
+if show_colonial_legend:
+    legend_x = x_min + ((x_max - x_min) * 0.025)
+    legend_y = y_min + ((y_max - y_min) * 0.06)
+    line_gap = (y_max - y_min) * 0.035
+    box_width = (x_max - x_min) * 0.012
+    box_height = (y_max - y_min) * 0.018
+
+    ax.text(
+        legend_x,
+        legend_y + line_gap * (len(colonial_colors) + 0.7),
+        "지배국",
+        fontsize=6.5,
+        ha="left",
+        va="center",
+        color="black",
+        zorder=20,
+        bbox=dict(
+            boxstyle="round,pad=0.18",
+            facecolor="white",
+            edgecolor="none",
+            alpha=0.75
+        )
+    )
+
+    for i, (owner_name, owner_color) in enumerate(colonial_colors.items()):
+        y = legend_y + line_gap * (len(colonial_colors) - i)
+
+        ax.add_patch(
+            plt.Rectangle(
+                (legend_x, y - box_height / 2),
+                box_width,
+                box_height,
+                facecolor=owner_color,
+                edgecolor="black",
+                linewidth=0.25,
+                alpha=0.9,
+                zorder=20
+            )
+        )
+
+        ax.text(
+            legend_x + box_width * 1.6,
+            y,
+            owner_name,
+            fontsize=5.4,
+            ha="left",
+            va="center",
+            color="black",
+            zorder=20,
+            bbox=dict(
+                facecolor="white",
+                edgecolor="none",
+                alpha=0.55,
+                pad=0.4
+            )
+        )
+
+
 
 # -----------------------------
 # 국가명 표시
@@ -1117,8 +1677,6 @@ if label_mode == "국가명 보이기":
 
     for _, row in region.iterrows():
 
-# 강조 프리셋 사용 + 해당 국가만 보기일 때만
-# 강조 국가만 이름 표시
         if highlight_names and show_highlight_only:
             if row["ADMIN"] not in highlight_names:
                 continue
@@ -1173,7 +1731,6 @@ elif label_mode == "번호 보이기":
         label_x = x
         label_y = y
 
-        # 선으로 빼기를 켰을 때만 작은 국가 번호를 바깥으로 이동
         if use_leader_lines and area < small_area:
             dx, dy = 0, 0
 
@@ -1202,7 +1759,6 @@ elif label_mode == "번호 보이기":
             "label_y": label_y,
         })
 
-    # 선으로 빼기를 켰을 때만 번호끼리 겹침 방지
     if use_leader_lines:
         for _ in range(ITERATIONS):
             moved = False
@@ -1290,15 +1846,43 @@ fig.savefig(
 )
 preview_buf.seek(0)
 
-
 preview_col, _ = st.columns([A4_LANDSCAPE_RATIO, 0.2])
 
 with preview_col:
-    st.image(
-        preview_buf,
-        width=A4_PREVIEW_WIDTH
-    )
+    if view_mode == "판서 모드":
+        background_image = Image.open(preview_buf).convert("RGBA")
 
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 255, 255, 0)",
+            stroke_width=board_pen_width,
+            stroke_color=board_pen_color,
+            background_image=background_image,
+            update_streamlit=True,
+            height=A4_PREVIEW_HEIGHT,
+            width=A4_PREVIEW_WIDTH,
+            drawing_mode="freedraw",
+            key="board_canvas",
+        )
+
+        if canvas_result.image_data is not None:
+            board_img = Image.fromarray(canvas_result.image_data.astype("uint8"))
+
+            board_buf = io.BytesIO()
+            board_img.save(board_buf, format="PNG")
+            board_buf.seek(0)
+
+            st.download_button(
+                label="판서 이미지 PNG 다운로드",
+                data=board_buf,
+                file_name="map_board.png",
+                mime="image/png"
+            )
+
+    else:
+        st.image(
+            preview_buf,
+            width=A4_PREVIEW_WIDTH
+        )
 
 # -----------------------------
 # 다운로드
@@ -1330,7 +1914,6 @@ fig.savefig(
     format="svg",
     facecolor=fig.get_facecolor()
 )
-
 svg_buf.seek(0)
 
 with col2:
