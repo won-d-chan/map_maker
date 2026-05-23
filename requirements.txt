@@ -1,9 +1,11 @@
 streamlit
+geopandas
 pandas
 matplotlib
 folium
 streamlit-folium
-geopandas
+streamlit-drawable-canvas
+Pillow
 shapely
 pyproj
 pyogrio
